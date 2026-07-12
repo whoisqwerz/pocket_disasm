@@ -122,14 +122,15 @@ class MultiSessionSupervisor:
             session_name = self._unique_name(name, fallback)
             reserved = {session.port for session in self._sessions.values()}
             port = _free_port(self.host, self.base_port, reserved)
+            workspace = self.workspace_root / f"{session_name}-{uuid.uuid4().hex[:8]}"
             backend = BackendProcess(
                 self.ida_dir,
                 host=self.host,
                 port=port,
                 unsafe=self.unsafe,
                 verbose=self.verbose,
+                log_path=workspace / "worker.log",
             )
-            workspace = self.workspace_root / f"{session_name}-{uuid.uuid4().hex[:8]}"
             session = WorkerSession(session_name, binary, port, backend, workspace)
             self._sessions[session_name] = session
             self._executor.submit(self._start_worker, session)

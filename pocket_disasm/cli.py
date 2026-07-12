@@ -12,6 +12,7 @@ from . import __version__
 from .backend import port_is_open
 from .config import Settings, discover_ida_dir, is_ida_dir
 from .daemon import inspect_daemon, read_pidfile, remove_pidfile, start_daemon, stop_daemon, write_pidfile
+from .diagnostics import append_event, append_exception, event_log_path, tail_file
 from .integrations import endpoint as integration_endpoint
 from .integrations import integrate_targets, remember_integrations, update_integration_endpoints
 from .supervisor import MultiSessionSupervisor
@@ -19,6 +20,21 @@ from .transport import McpHttpClient, McpTransportError
 
 
 EXPECTED_MCP_VERSION = "2.0.0"
+
+
+def _print_start_failure_logs(tail: int = 30) -> None:
+    from .config import runtime_dir
+
+    root = runtime_dir()
+    paths = (root / "pocket-disasm.err.log", root / "pocket-disasm.out.log", event_log_path())
+    print(f"Diagnostic logs: {root}")
+    for path in paths:
+        lines = tail_file(path, tail)
+        if not lines:
+            continue
+        print(f"\n== {path.name} ==")
+        for line in lines:
+            print(line)
 
 
 def _package_version(name: str) -> str | None:
@@ -89,6 +105,7 @@ def command_config(args: argparse.Namespace) -> int:
     if args.max_workers is not None:
         settings.max_workers = args.max_workers
     path = settings.save()
+    append_event("info", "configuration.saved", path=str(path), port=settings.port, ida_dir=settings.ida_dir)
     print(f"Saved configuration: {path}")
     return 0
 
@@ -146,18 +163,24 @@ def command_start(args: argparse.Namespace) -> int:
         print(f"Pocket Disasm is already running at {state.endpoint}")
         return 0
     process = start_daemon(_serve_args_from_namespace(args))
+    append_event("info", "daemon.start.requested", pid=process.pid)
     print(f"Starting Pocket Disasm daemon (pid {process.pid})...")
     deadline = time.monotonic() + args.timeout
     while time.monotonic() < deadline:
         state = inspect_daemon(settings)
         if state.running:
+            append_event("info", "daemon.ready", endpoint=state.endpoint, pid=state.pid)
             print(f"Endpoint: {state.endpoint}")
             return 0
         if process.poll() is not None:
+            append_event("error", "daemon.start.failed", pid=process.pid, exit_code=process.returncode)
             print(f"Daemon exited early with code {process.returncode}")
+            _print_start_failure_logs()
             return int(process.returncode or 1)
         time.sleep(0.25)
     print(f"Daemon did not become ready within {args.timeout:.1f}s; check logs with `pocket-disasm logs`.")
+    append_event("error", "daemon.start.timeout", pid=process.pid, timeout=args.timeout)
+    _print_start_failure_logs()
     return 1
 
 
@@ -203,6 +226,13 @@ def command_integrate(args: argparse.Namespace) -> int:
     )
     if not args.dry_run:
         remember_integrations(results)
+        append_event(
+            "info",
+            "integration.updated",
+            targets=args.targets,
+            scope=args.scope,
+            paths=[str(result.path) for result in results if result.path],
+        )
     print(f"Pocket Disasm MCP endpoint: {integration_endpoint(settings)}")
     for result in results:
         action = "would update" if args.dry_run and result.changed else "updated" if result.changed else "already configured"
@@ -240,6 +270,13 @@ def command_port(args: argparse.Namespace) -> int:
         project_dir=Path(args.project_dir).expanduser().resolve(),
     )
     print(f"MCP endpoint: http://{settings.host}:{settings.port}/mcp")
+    append_event(
+        "info",
+        "endpoint.changed",
+        old_port=old_settings.port,
+        new_port=settings.port,
+        updated_configs=[str(path) for path in changed],
+    )
     if changed:
         print("Updated MCP configurations:")
         for path in changed:
@@ -439,8 +476,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    result = args.handler(args)
-    return int(result) if result is not None else 0
+    try:
+        append_event("info", "command.started", command=args.command, argv=argv or sys.argv[1:])
+        result = args.handler(args)
+        exit_code = int(result) if result is not None else 0
+        append_event("info", "command.finished", command=args.command, exit_code=exit_code)
+        return exit_code
+    except BaseException as error:
+        append_exception("command.failed", error, command=getattr(args, "command", None), argv=argv or sys.argv[1:])
+        raise
 
 
 if __name__ == "__main__":

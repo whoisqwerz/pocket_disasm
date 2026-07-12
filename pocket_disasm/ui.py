@@ -23,6 +23,7 @@ from rich.text import Span, Text
 from . import __version__
 from .config import Settings, discover_ida_dir, is_ida_dir, runtime_dir
 from .daemon import inspect_daemon, start_daemon, stop_daemon
+from .diagnostics import append_exception, event_log_path
 from .integrations import endpoint, integrate_targets, integration_status, remember_integrations
 from .transport import McpHttpClient, McpTransportError
 
@@ -398,11 +399,20 @@ def _configure_ida(console: Console) -> None:
 def _logs(console: Console) -> None:
     root = runtime_dir()
     console.print(f"[cyan]Log directory:[/] {root}")
-    for path in (root / "pocket-disasm.out.log", root / "pocket-disasm.err.log"):
+    for path in (root / "pocket-disasm.out.log", root / "pocket-disasm.err.log", event_log_path()):
         console.print(f"\n[bold]{path.name}[/]")
         if not path.exists():
             console.print("[dim]<missing>[/]")
             continue
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]:
+            console.print(line)
+    worker_logs = sorted(
+        (root / "sessions").glob("*/worker.log"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )[:4]
+    for path in worker_logs:
+        console.print(f"\n[bold]{path.parent.name} / worker.log[/]")
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]:
             console.print(line)
     state = inspect_daemon(Settings.load())
@@ -941,6 +951,7 @@ class PocketDisasmApp(App[int]):
             else:
                 return
         except Exception as error:
+            append_exception("tui.action.failed", error, action=name, argument=argument)
             console.print(f"Error: {error}")
         output = buffer.getvalue().strip() or f"{name}: done"
         self.call_from_thread(self._show_output, name, output)

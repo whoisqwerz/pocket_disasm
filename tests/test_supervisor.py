@@ -24,6 +24,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(len(sessions), 8)
             self.assertEqual(len({session.port for session in sessions}), 8)
             self.assertEqual(len({id(session.backend) for session in sessions}), 8)
+            self.assertTrue(all(session.backend.log_path == session.workspace / "worker.log" for session in sessions))
             self.assertTrue(all(session.state == "ready" for session in sessions))
             supervisor.close_all()
 

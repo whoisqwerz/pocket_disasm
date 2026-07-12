@@ -11,6 +11,25 @@ $ProductRoot = Join-Path $env:LOCALAPPDATA "PocketDisasm"
 $VenvRoot = Join-Path $ProductRoot "venv"
 $BinRoot = Join-Path $ProductRoot "bin"
 $PythonExe = Join-Path $VenvRoot "Scripts\python.exe"
+New-Item -ItemType Directory -Force -Path $ProductRoot | Out-Null
+$InstallerLog = Join-Path $ProductRoot "installer.log"
+$TranscriptStarted = $false
+try {
+    Start-Transcript -Path $InstallerLog -Append | Out-Null
+    $TranscriptStarted = $true
+} catch { }
+
+trap {
+    $detail = $_ | Out-String
+    try { Add-Content -LiteralPath $InstallerLog -Value $detail -Encoding UTF8 } catch { }
+    Write-Host ""
+    Write-Host "Pocket Disasm installation failed." -ForegroundColor Red
+    Write-Host "Diagnostic log: $InstallerLog"
+    if ($TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { }
+    }
+    exit 1
+}
 
 function Write-Step([string]$Message) {
     Write-Host "  ~ " -NoNewline -ForegroundColor Cyan
@@ -121,6 +140,11 @@ if ($DoctorExit -ne 0) {
     Write-Host "IDA still needs configuration. Run: pocket" -ForegroundColor Yellow
 }
 Write-Host "Open a new terminal before using the global command there."
+
+if ($TranscriptStarted) {
+    try { Stop-Transcript | Out-Null } catch { }
+    $TranscriptStarted = $false
+}
 
 if (-not $NoLaunch) {
     & $PythonExe -m pocket_disasm control

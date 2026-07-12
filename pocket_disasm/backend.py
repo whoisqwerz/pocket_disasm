@@ -47,12 +47,14 @@ class BackendProcess:
         *,
         unsafe: bool = False,
         verbose: bool = False,
+        log_path: Path | None = None,
     ) -> None:
         self.ida_dir = ida_dir
         self.host = host
         self.port = port
         self.unsafe = unsafe
         self.verbose = verbose
+        self.log_path = log_path
         self.process: subprocess.Popen[str] | None = None
         self.logs: deque[str] = deque(maxlen=300)
         self._reader: threading.Thread | None = None
@@ -124,8 +126,20 @@ class BackendProcess:
         process = self.process
         if process is None or process.stdout is None:
             return
-        for line in process.stdout:
-            self.logs.append(line.rstrip())
+        stream = None
+        try:
+            if self.log_path is not None:
+                self.log_path.parent.mkdir(parents=True, exist_ok=True)
+                stream = self.log_path.open("a", encoding="utf-8")
+            for line in process.stdout:
+                value = line.rstrip()
+                self.logs.append(value)
+                if stream is not None:
+                    stream.write(value + "\n")
+                    stream.flush()
+        finally:
+            if stream is not None:
+                stream.close()
 
     def status(self) -> dict:
         running = port_is_open(self.host, self.port)

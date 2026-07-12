@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .backend import port_is_open
 from .config import Settings, runtime_dir
+from .diagnostics import append_event
 
 
 @dataclass(slots=True)
@@ -116,7 +117,9 @@ def inspect_daemon(settings: Settings | None = None) -> DaemonState:
 def stop_daemon(timeout: float = 10.0, settings: Settings | None = None) -> DaemonState:
     state = inspect_daemon(settings)
     if not state.running or not state.pid:
+        append_event("info", "daemon.stop.skipped", endpoint=state.endpoint, reason="not-running")
         return state
+    append_event("info", "daemon.stop.requested", endpoint=state.endpoint, pid=state.pid)
     if os.name == "nt":
         subprocess.call(["taskkill", "/PID", str(state.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
@@ -125,6 +128,7 @@ def stop_daemon(timeout: float = 10.0, settings: Settings | None = None) -> Daem
     while time.monotonic() < deadline:
         if not process_is_running(state.pid):
             remove_pidfile()
+            append_event("info", "daemon.stopped", endpoint=state.endpoint, pid=state.pid)
             return DaemonState(state.pid, state.endpoint, False, state.source)
         time.sleep(0.2)
     return inspect_daemon(settings)
@@ -133,12 +137,29 @@ def stop_daemon(timeout: float = 10.0, settings: Settings | None = None) -> Daem
 def start_daemon(args: list[str], log_prefix: str = "pocket-disasm") -> subprocess.Popen[bytes]:
     runtime = runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-m", "pocket_disasm", "serve", "--no-repl", *args]
+    command = [sys.executable, "-u", "-m", "pocket_disasm", "serve", "--no-repl", *args]
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     stdout = open(runtime / f"{log_prefix}.out.log", "ab")
     stderr = open(runtime / f"{log_prefix}.err.log", "ab")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
     try:
-        return subprocess.Popen(command, stdout=stdout, stderr=stderr, creationflags=creationflags)
+        process = subprocess.Popen(
+            command,
+            stdout=stdout,
+            stderr=stderr,
+            creationflags=creationflags,
+            env=env,
+        )
+        append_event(
+            "info",
+            "daemon.process.spawned",
+            pid=process.pid,
+            command=command,
+            stdout=str(runtime / f"{log_prefix}.out.log"),
+            stderr=str(runtime / f"{log_prefix}.err.log"),
+        )
+        return process
     finally:
         stdout.close()
         stderr.close()

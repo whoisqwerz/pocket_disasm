@@ -21,6 +21,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("[switch]$NoLaunch", script)
         self.assertIn("[switch]$Uninstall", script)
         self.assertIn('[string]$IdaDir', script)
+        self.assertIn('Join-Path $ProductRoot "installer.log"', script)
+        self.assertIn("Start-Transcript", script)
 
     def test_unpublished_mcp_version_uses_pinned_upstream_archive(self):
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
