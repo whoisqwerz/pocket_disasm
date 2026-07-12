@@ -82,6 +82,8 @@ if (-not (Test-Path $PythonExe)) {
 }
 
 Write-Step "Installing Pocket Disasm and its pinned dependencies"
+& $PythonExe -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
+if ($LASTEXITCODE -ne 0) { throw "Could not update the Python packaging tools." }
 & $PythonExe -m pip install --disable-pip-version-check --upgrade $Source
 if ($LASTEXITCODE -ne 0) { throw "Pocket Disasm installation failed." }
 

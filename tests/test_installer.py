@@ -22,6 +22,11 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("[switch]$Uninstall", script)
         self.assertIn('[string]$IdaDir', script)
 
+    def test_unpublished_mcp_version_uses_pinned_upstream_archive(self):
+        project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn("mrexodia/ida-pro-mcp/archive/ab7a648d344d9c7a368634a88abed69fee296c09.zip", project)
+        self.assertNotIn('"ida-pro-mcp==2.0.0"', project)
+
 
 if __name__ == "__main__":
     unittest.main()

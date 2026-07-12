@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Pocket Disasm contributors" }]
 dependencies = [
-  "ida-pro-mcp==2.0.0",
+  "ida-pro-mcp @ https://github.com/mrexodia/ida-pro-mcp/archive/ab7a648d344d9c7a368634a88abed69fee296c09.zip",
   "idapro==0.0.7",
   "rich>=13.7",
   "textual>=6.0,<7",
