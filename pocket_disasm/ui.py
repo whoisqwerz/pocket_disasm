@@ -563,7 +563,7 @@ class PocketDisasmApp(App[int]):
     #main { height: 1fr; width: 100%; }
     #commands { width: 100%; height: 1fr; padding: 0; }
     #commands-title { height: 2; color: #c8d0d3; text-style: bold; }
-    #action-menu { height: 8; color: #dfe6e8; }
+    #action-menu { height: 9; color: #dfe6e8; }
     #activity-line { height: 1; margin-top: 1; }
     #output { height: 2; color: #8d999e; overflow: hidden; }
     #command-row { height: 1; margin-top: 1; }
@@ -593,7 +593,8 @@ class PocketDisasmApp(App[int]):
         Binding("4", "run_named('integrate')", "Integrate", show=False),
         Binding("5", "run_named('configure')", "Configure", show=False),
         Binding("6", "run_named('port')", "Port", show=False),
-        Binding("7", "run_named('logs')", "Logs", show=False),
+        Binding("7", "run_named('capacity')", "Capacity", show=False),
+        Binding("8", "run_named('logs')", "Logs", show=False),
     ]
 
     def __init__(self, art_path: Path | None = None) -> None:
@@ -607,7 +608,7 @@ class PocketDisasmApp(App[int]):
         self.activity_waiting = False
         self.activity_frame = 0
         self.selected_action = 0
-        self.action_names = ("start", "stop", "restart", "integrate", "configure", "port", "logs")
+        self.action_names = ("start", "stop", "restart", "integrate", "configure", "port", "capacity", "logs")
         self.update_info: UpdateInfo | None = None
         self.agent_selection: int | None = None
         self.agent_targets = ("codex", "claude", "cursor", "vscode", "windsurf", "all")
@@ -751,6 +752,7 @@ class PocketDisasmApp(App[int]):
             ("Connect a coding agent", f"{configured_agents}/5 configured"),
             ("Configure IDA", str(ida_path) if ida_ready else "select the IDALib installation"),
             ("Change MCP port", str(self.settings.port)),
+            ("Concurrent IDALib sessions", f"{self.settings.max_workers} workers"),
             ("Inspect logs", "read recent router output"),
         ]
         if "update" in self.action_names and self.update_info:
@@ -801,6 +803,9 @@ class PocketDisasmApp(App[int]):
             "integrate": "integrate",
             "ida": "configure",
             "configure": "configure",
+            "capacity": "capacity",
+            "workers": "capacity",
+            "instances": "capacity",
             "update": "update",
         }
         command = aliases.get(raw.split()[0] if raw else "")
@@ -817,6 +822,8 @@ class PocketDisasmApp(App[int]):
             self._request_inline("configure", "IDA directory containing idalib.dll", current)
         elif name == "port":
             self._request_inline("port", "Public MCP port", str(self.settings.port))
+        elif name == "capacity":
+            self._request_inline("capacity", "Maximum simultaneous IDALib sessions (1–128)", str(self.settings.max_workers))
         else:
             self._launch_command(name)
 
@@ -885,6 +892,8 @@ class PocketDisasmApp(App[int]):
             label = f"Configuring IDA… ({default})"
         elif mode == "port":
             label = f"Changing MCP port… ({default})"
+        elif mode == "capacity":
+            label = f"Changing session capacity… ({default})"
         else:
             label = "Connecting a coding agent…"
         self._set_activity(label, waiting=True, hint="(enter to confirm · esc to cancel)")
@@ -986,6 +995,20 @@ class PocketDisasmApp(App[int]):
                 if result.returncode:
                     raise RuntimeError(result.stderr.strip() or f"Port command failed ({result.returncode})")
                 self.settings = Settings.load()
+            elif name == "capacity" and argument:
+                capacity = int(argument)
+                if not 1 <= capacity <= 128:
+                    raise ValueError("Session capacity must be between 1 and 128")
+                state = inspect_daemon(Settings.load())
+                settings = Settings.load()
+                settings.max_workers = capacity
+                settings.save()
+                append_event("info", "configuration.capacity.changed", max_workers=capacity)
+                self.settings = settings
+                console.print(f"Concurrent IDALib session limit: {capacity}")
+                if state.running:
+                    console.print("Restarting router to apply the new limit…")
+                    _restart(console)
             elif name == "update":
                 state = inspect_daemon(Settings.load())
                 if state.running:

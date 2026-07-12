@@ -164,6 +164,27 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(app.launched, ("port", "14444"))
 
+    async def test_capacity_uses_current_worker_limit(self):
+        class RecordingApp(PocketDisasmApp):
+            launched = None
+
+            def _launch_command(self, name: str, argument: str | None = None) -> None:
+                self.launched = (name, argument)
+
+        app = RecordingApp()
+        async with app.run_test(size=(100, 32)) as pilot:
+            await pilot.pause()
+            app.action_run_named("capacity")
+            await pilot.pause()
+            field = app.query_one("#command-input", Input)
+            self.assertEqual(app.pending_input, "capacity")
+            self.assertEqual(field.value, str(app.settings.max_workers))
+            self.assertIn("Changing session capacity", app.query_one("#activity-line", Static).render().plain)
+            field.value = "16"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.launched, ("capacity", "16"))
+
     async def test_escape_leaves_inline_configuration(self):
         app = PocketDisasmApp()
         async with app.run_test(size=(100, 32)) as pilot:
