@@ -26,6 +26,7 @@ from .daemon import inspect_daemon, start_daemon, stop_daemon
 from .diagnostics import append_event, append_exception, event_log_path
 from .integrations import endpoint, integrate_targets, integration_status, remember_integrations
 from .transport import McpHttpClient, McpTransportError
+from .updates import UpdateInfo, check_for_update, install_update
 
 
 FALLBACK_IDA_ART = """
@@ -409,7 +410,7 @@ def _configure_ida(console: Console) -> None:
 def _logs(console: Console) -> None:
     root = runtime_dir()
     console.print(f"[cyan]Log directory:[/] {root}")
-    for path in (root / "pocket-disasm.out.log", root / "pocket-disasm.err.log", event_log_path()):
+    for path in (root / "pocket-disasm.out.log", root / "pocket-disasm.err.log", root / "update.log", event_log_path()):
         console.print(f"\n[bold]{path.name}[/]")
         if not path.exists():
             console.print("[dim]<missing>[/]")
@@ -458,6 +459,8 @@ def run_control_center(art_path: Path | None = None) -> int:
     set_console_font_once("JetBrains Mono")
     resize_console_once()
     result = PocketDisasmApp(art_path=art_path).run()
+    if result == 10:
+        os.execv(sys.executable, [sys.executable, "-m", "pocket_disasm", "control"])
     return int(result or 0)
 
 
@@ -560,7 +563,7 @@ class PocketDisasmApp(App[int]):
     #main { height: 1fr; width: 100%; }
     #commands { width: 100%; height: 1fr; padding: 0; }
     #commands-title { height: 2; color: #c8d0d3; text-style: bold; }
-    #action-menu { height: 7; color: #dfe6e8; }
+    #action-menu { height: 8; color: #dfe6e8; }
     #activity-line { height: 1; margin-top: 1; }
     #output { height: 2; color: #8d999e; overflow: hidden; }
     #command-row { height: 1; margin-top: 1; }
@@ -605,6 +608,7 @@ class PocketDisasmApp(App[int]):
         self.activity_frame = 0
         self.selected_action = 0
         self.action_names = ("start", "stop", "restart", "integrate", "configure", "port", "logs")
+        self.update_info: UpdateInfo | None = None
         self.agent_selection: int | None = None
         self.agent_targets = ("codex", "claude", "cursor", "vscode", "windsurf", "all")
         self.scope_selection: int | None = None
@@ -638,6 +642,9 @@ class PocketDisasmApp(App[int]):
         self._render_actions()
         self.set_focus(None)
         self.action_refresh_status()
+        self.check_updates()
+        if os.environ.pop("POCKET_DISASM_START_AFTER_UPDATE", "") == "1":
+            self.call_after_refresh(self._launch_command, "start")
         self.set_interval(3.0, self.action_refresh_status)
         self.set_interval(0.09, self._animate_activity)
 
@@ -666,6 +673,24 @@ class PocketDisasmApp(App[int]):
             self.query_one("#session-hint", Label).update(f"pid {state.pid or '—'}  ·  MCP ready")
         else:
             self.query_one("#session-hint", Label).update("router stopped")
+
+    @work(thread=True, exclusive=True, group="update-check")
+    def check_updates(self) -> None:
+        try:
+            info = check_for_update(__version__)
+            append_event("info", "update.checked", current=info.current, latest=info.latest, available=info.available)
+            self.call_from_thread(self._show_update, info)
+        except Exception as error:
+            append_exception("update.check.failed", error)
+
+    def _show_update(self, info: UpdateInfo) -> None:
+        self.update_info = info
+        names = [name for name in self.action_names if name != "update"]
+        if info.available:
+            names.append("update")
+        self.action_names = tuple(names)
+        self.selected_action = min(self.selected_action, len(self.action_names) - 1)
+        self._render_actions()
 
     def action_run_selected(self) -> None:
         if self.scope_selection is not None and self.scope_target:
@@ -719,7 +744,7 @@ class PocketDisasmApp(App[int]):
         configured_agents = sum(agent_state.values())
         ida_path = discover_ida_dir(settings=self.settings)
         ida_ready = bool(ida_path and is_ida_dir(ida_path))
-        rows = (
+        rows = [
             ("Start MCP router", "bring the shared endpoint online"),
             ("Stop MCP router", "close the endpoint and workers"),
             ("Restart cleanly", "reload configuration and runtime"),
@@ -727,7 +752,9 @@ class PocketDisasmApp(App[int]):
             ("Configure IDA", str(ida_path) if ida_ready else "select the IDALib installation"),
             ("Change MCP port", str(self.settings.port)),
             ("Inspect logs", "read recent router output"),
-        )
+        ]
+        if "update" in self.action_names and self.update_info:
+            rows.append(("Update Pocket Disasm", f"{self.update_info.current} → {self.update_info.latest}"))
         text = Text()
         for index, (title, detail) in enumerate(rows):
             if index:
@@ -774,6 +801,7 @@ class PocketDisasmApp(App[int]):
             "integrate": "integrate",
             "ida": "configure",
             "configure": "configure",
+            "update": "update",
         }
         command = aliases.get(raw.split()[0] if raw else "")
         if command:
@@ -958,6 +986,17 @@ class PocketDisasmApp(App[int]):
                 if result.returncode:
                     raise RuntimeError(result.stderr.strip() or f"Port command failed ({result.returncode})")
                 self.settings = Settings.load()
+            elif name == "update":
+                state = inspect_daemon(Settings.load())
+                if state.running:
+                    stop_daemon(settings=Settings.load())
+                    os.environ["POCKET_DISASM_START_AFTER_UPDATE"] = "1"
+                append_event("info", "update.install.started", current=__version__)
+                log_path = install_update()
+                append_event("info", "update.install.finished", current=__version__, latest=self.update_info.latest if self.update_info else None)
+                console.print(f"Updated to {self.update_info.latest if self.update_info else 'latest'}. Restarting…")
+                console.print(f"Update log: {log_path}")
+                self.call_from_thread(self.exit, 10)
             else:
                 return
         except Exception as error:

@@ -108,7 +108,7 @@ class McpHttpClient:
                 {
                     "protocolVersion": "2025-06-18",
                     "capabilities": {},
-                    "clientInfo": {"name": "pocket-disasm-router", "version": "0.1.2"},
+                    "clientInfo": {"name": "pocket-disasm-router", "version": "0.2.0"},
                 },
             )
             self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, allow_empty=True)

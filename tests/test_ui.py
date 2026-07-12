@@ -8,6 +8,7 @@ from rich.console import Console
 from textual.widgets import Input, Static
 
 from pocket_disasm.ui import PocketDisasmApp, _start, load_art, parse_colored_ascii_html
+from pocket_disasm.updates import UpdateInfo
 
 
 class UiTests(unittest.TestCase):
@@ -51,6 +52,15 @@ class UiTests(unittest.TestCase):
 
 
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_available_update_appears_as_action(self):
+        app = PocketDisasmApp()
+        async with app.run_test(size=(100, 32)) as pilot:
+            await pilot.pause()
+            app._show_update(UpdateInfo("1.0.0", "1.1.0", True))
+            await pilot.pause()
+            self.assertEqual(app.action_names[-1], "update")
+            self.assertIn("Update Pocket Disasm", app.query_one("#action-menu", Static).render().plain)
+
     async def test_ctrl_q_exits_cleanly(self):
         app = PocketDisasmApp()
         async with app.run_test(size=(100, 32)) as pilot:
