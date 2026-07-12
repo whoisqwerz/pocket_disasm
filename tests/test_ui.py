@@ -1,12 +1,30 @@
 import unittest
+from io import StringIO
 from importlib import resources
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from rich.console import Console
 from textual.widgets import Input, Static
 
-from pocket_disasm.ui import PocketDisasmApp, load_art, parse_colored_ascii_html
+from pocket_disasm.ui import PocketDisasmApp, _start, load_art, parse_colored_ascii_html
 
 
 class UiTests(unittest.TestCase):
+    def test_start_action_records_startup_events(self):
+        offline = SimpleNamespace(running=False, endpoint="http://127.0.0.1:13339/mcp", pid=None)
+        online = SimpleNamespace(running=True, endpoint="http://127.0.0.1:13339/mcp", pid=123)
+        process = SimpleNamespace(pid=123, poll=lambda: None)
+        console = Console(file=StringIO(), force_terminal=False)
+        with (
+            patch("pocket_disasm.ui.inspect_daemon", side_effect=[offline, online]),
+            patch("pocket_disasm.ui.start_daemon", return_value=process),
+            patch("pocket_disasm.ui.append_event") as event,
+        ):
+            _start(console)
+        names = [call.args[1] for call in event.call_args_list]
+        self.assertEqual(names, ["tui.daemon.start.requested", "tui.daemon.start.spawned", "tui.daemon.start.ready"])
+
     def test_parse_colored_ascii_html_keeps_rgb_spans(self):
         text = parse_colored_ascii_html(
             '<pre><span style="color:rgb(0,0,0)">-</span>'

@@ -23,7 +23,7 @@ from rich.text import Span, Text
 from . import __version__
 from .config import Settings, discover_ida_dir, is_ida_dir, runtime_dir
 from .daemon import inspect_daemon, start_daemon, stop_daemon
-from .diagnostics import append_exception, event_log_path
+from .diagnostics import append_event, append_exception, event_log_path
 from .integrations import endpoint, integrate_targets, integration_status, remember_integrations
 from .transport import McpHttpClient, McpTransportError
 
