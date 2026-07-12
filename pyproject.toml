@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=65.5"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocket-disasm"
+version = "0.1.0"
+description = "A lightweight IDALib desktop shell with an IDA Pro MCP-compatible backend"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Pocket Disasm contributors" }]
+dependencies = [
+  "ida-pro-mcp==2.0.0",
+  "idapro==0.0.7",
+  "rich>=13.7",
+  "textual>=6.0,<7",
+]
+
+[project.scripts]
+pocket = "pocket_disasm.cli:main"
+pocket-disasm = "pocket_disasm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pocket_disasm*"]
+
+[tool.setuptools.package-data]
+pocket_disasm = ["assets/*"]
