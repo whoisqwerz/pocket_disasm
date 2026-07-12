@@ -50,10 +50,31 @@ def remove_pidfile(path: Path | None = None) -> None:
 def process_is_running(pid: int | None) -> bool:
     if not pid:
         return False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong)
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+            kernel32.GetExitCodeProcess.restype = ctypes.c_bool
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            kernel32.CloseHandle.restype = ctypes.c_bool
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and exit_code.value == 259
+            finally:
+                kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, ValueError):
+            return False
     try:
         os.kill(pid, 0)
         return True
-    except (OSError, SystemError):
+    except OSError:
         return False
 
 
