@@ -338,19 +338,29 @@ def _pause(console: Console) -> None:
 
 def _start(console: Console) -> None:
     settings = Settings.load()
+    append_event("info", "tui.daemon.start.requested", endpoint=endpoint(settings))
     state = inspect_daemon(settings)
     if state.running:
         console.print(f"[green]Already running at {state.endpoint}[/]")
         return
     process = start_daemon([])
+    append_event("info", "tui.daemon.start.spawned", pid=process.pid)
     console.print(f"[cyan]Starting daemon, pid {process.pid}...[/]")
     deadline = time.monotonic() + 20.0
     while time.monotonic() < deadline:
         state = inspect_daemon(settings)
         if state.running:
+            append_event("info", "tui.daemon.start.ready", endpoint=state.endpoint, pid=state.pid)
             console.print(f"[green]Ready: {state.endpoint}[/]")
             return
+        exit_code = process.poll()
+        if exit_code is not None:
+            append_event("error", "tui.daemon.start.failed", pid=process.pid, exit_code=exit_code)
+            console.print(f"[red]Daemon exited with code {exit_code}. Open Inspect logs.[/]")
+            console.print(f"[dim]Diagnostic log: {event_log_path()}[/]")
+            return
         time.sleep(0.25)
+    append_event("error", "tui.daemon.start.timeout", pid=process.pid, timeout=20.0)
     console.print("[yellow]Daemon did not become ready within 20 seconds. Check logs.[/]")
 
 
@@ -953,6 +963,7 @@ class PocketDisasmApp(App[int]):
         except Exception as error:
             append_exception("tui.action.failed", error, action=name, argument=argument)
             console.print(f"Error: {error}")
+            console.print(f"Diagnostic log: {event_log_path()}")
         output = buffer.getvalue().strip() or f"{name}: done"
         self.call_from_thread(self._show_output, name, output)
 

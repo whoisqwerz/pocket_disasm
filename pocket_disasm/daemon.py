@@ -44,12 +44,12 @@ def remove_pidfile(path: Path | None = None) -> None:
     path = path or pidfile_path()
     try:
         path.unlink()
-    except FileNotFoundError:
+    except OSError:
         return
 
 
 def process_is_running(pid: int | None) -> bool:
-    if not pid:
+    if not pid or pid <= 0:
         return False
     if os.name == "nt":
         try:
@@ -62,15 +62,24 @@ def process_is_running(pid: int | None) -> bool:
             kernel32.GetExitCodeProcess.restype = ctypes.c_bool
             kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
             kernel32.CloseHandle.restype = ctypes.c_bool
+            ctypes.set_last_error(0)
             handle = kernel32.OpenProcess(0x1000, False, pid)
             if not handle:
+                ctypes.set_last_error(0)
                 return False
             try:
                 exit_code = ctypes.c_ulong()
-                return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and exit_code.value == 259
+                running = bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and exit_code.value == 259
+                ctypes.set_last_error(0)
+                return running
             finally:
                 kernel32.CloseHandle(handle)
-        except (AttributeError, OSError, ValueError):
+                ctypes.set_last_error(0)
+        except (AttributeError, OSError, OverflowError, SystemError, ValueError):
+            try:
+                ctypes.set_last_error(0)
+            except Exception:
+                pass
             return False
     try:
         os.kill(pid, 0)
@@ -109,6 +118,9 @@ def inspect_daemon(settings: Settings | None = None) -> DaemonState:
     pid = read_pidfile()
     if process_is_running(pid):
         return DaemonState(pid, endpoint, True, "pidfile")
+    if pid is not None:
+        remove_pidfile()
+        append_event("warning", "daemon.pidfile.stale", pid=pid, endpoint=endpoint)
     if port_is_open(settings.host, settings.port):
         return DaemonState(_windows_pid_for_port(settings.port), endpoint, True, "port")
     return DaemonState(None, endpoint, False, "none")
